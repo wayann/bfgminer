@@ -783,18 +783,18 @@ char *x6500_set_device(struct cgpu_info *cgpu, char *option, char *setting, char
 		}
 		
 		val = atoi(setting);
-		if (val < X6500_MINIMUM_CLOCK || (val & 1) != 0) {
-			sprintf(replybuf, "invalid clock: '%s' valid range %d+ and a multiple of 2",
-			        setting, X6500_MINIMUM_CLOCK);
+		if (val < X6500_MINIMUM_CLOCK || val > X6500_MAXIMUM_CLOCK || (val & 1) != 0) {
+			sprintf(replybuf, "invalid maxclock: '%s' valid range %d-%d and a multiple of 2",
+			        setting, X6500_MINIMUM_CLOCK, X6500_MAXIMUM_CLOCK);
 			return replybuf;
 		}
 		
 		x6500_user_set_max_clock(cgpu, val);
                 
-                applog(LOG_NOTICE, "%"PRIpreprv": Maximum frequency reset to %u MHz",
-                        cgpu->proc_repr,
-                        val
-                );
+		applog(LOG_NOTICE, "%"PRIpreprv": Maximum frequency reset to %u MHz",
+		       cgpu->proc_repr,
+		       val
+		);
 		
 		return NULL;
 	}
