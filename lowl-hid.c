@@ -116,7 +116,15 @@ bool hidapi_load_library()
 #ifdef WIN32
 		        "dll"
 #else
+				
+#ifdef __APPLE__
+				//Mach-O uses dylibs for shared libraries
+				//http://www.finkproject.org/doc/porting/porting.en.html#shared
+		        "dylib"
+#else
 		        "so"
+#endif
+
 #endif
 		);
 		if (hidapi_try_lib(dlname))
