@@ -347,7 +347,7 @@ bool littlefury_thread_init(struct thr_info *thr)
 		spi = malloc(sizeof(*spi));
 		
 		/* Be careful, read spidevc.h comments for warnings */
-		memset(&spi,0,sizeof(spi));
+		memset(spi, 0, sizeof(*spi));
 		spi->txrx = littlefury_txrx;
 		spi->cgpu = proc;
 		spi->repr = proc->proc_repr;

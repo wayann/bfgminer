@@ -319,7 +319,7 @@ nomorecores: ;
 	};
 	
 	/* Be careful, read spidevc.h comments for warnings */
-	memset(&spi,0,sizeof(spi));
+	memset(spi, 0, sizeof(*spi));
 	spi->txrx = knc_spi_txrx;
 	spi->cgpu = cgpu;
 	spi->repr = knc_drv.dname;
