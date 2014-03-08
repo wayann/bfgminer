@@ -81,7 +81,7 @@ void gridseed_log_protocol(int fd, const char *buf, size_t size, const char *pre
 int gc3355_read(int fd, char *buf, int size)
 {
 	int read = serial_read(fd, buf, size);
-	if (opt_dev_protocol)
+	if ((read > 0) && opt_dev_protocol)
 		gridseed_log_protocol(fd, buf, size, "RECV");
 	return read;
 }

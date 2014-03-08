@@ -14,10 +14,27 @@
 #include "miner.h"
 
 #define GC3355_DEFAULT_FREQUENCY	600
+#define GC3355_DEFAULT_CHIPS		5
+
+#define GC3355_READ_SIZE			12
+#define GRIDSEED_HASH_SPEED			0.0851128926	// in ms
 
 struct gc3355_info
 {
 	uint16_t freq;
+	int chips;
+};
+
+struct gc3355_state
+{
+	// request
+	uint8_t work[156];
+
+	// response
+	uint32_t nonce;
+
+	// stats
+	int64_t hashrate;
 };
 
 extern
