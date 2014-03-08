@@ -429,6 +429,17 @@ if test "x$icarus" = xyes; then
 	have_udevrules=true
 fi
 AM_CONDITIONAL([HAS_ICARUS], [test x$icarus = xyes])
+  
+driverlist="$driverlist gridseed"
+gridseed=yes
+AC_ARG_ENABLE([gridseed],
+	[AC_HELP_STRING([--disable-gridseed],[Compile support for GridSeed (default enabled)])],
+	[gridseed=$enableval]
+	)
+if test "x$gridseed" = "xyes"; then
+	AC_DEFINE([USE_GRIDSEED], [1], [Defined to 1 if GridSeed support is wanted])
+fi
+AM_CONDITIONAL([USE_GRIDSEED], [test x$gridseed = xyes])
 
 driverlist="$driverlist avalon"
 avalon="no"
