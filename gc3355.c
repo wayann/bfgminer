@@ -71,7 +71,7 @@ const char *bin_frequency[] = {
 };
 
 static
-void gridseed_log_protocol(int fd, const char *buf, size_t size, const char *prefix)
+void gc3355_log_protocol(int fd, const char *buf, size_t size, const char *prefix)
 {
 	char hex[(size * 2) + 1];
 	bin2hex(hex, buf, size);
@@ -81,7 +81,7 @@ void gridseed_log_protocol(int fd, const char *buf, size_t size, const char *pre
 int gc3355_read(int fd, char *buf, size_t size)
 {
 	size_t read;
-	int tries = 2000;
+	int tries = 20;
 
 	while (tries > 0)
 	{
@@ -96,7 +96,7 @@ int gc3355_read(int fd, char *buf, size_t size)
 		return -1;
 
 	if ((read > 0) && opt_dev_protocol)
-		gridseed_log_protocol(fd, buf, size, "RECV");
+		gc3355_log_protocol(fd, buf, size, "RECV");
 
 	return read;
 }
@@ -104,7 +104,8 @@ int gc3355_read(int fd, char *buf, size_t size)
 ssize_t gc3355_write(int fd, const void * const buf, const size_t size)
 {
 	if (opt_dev_protocol)
-		gridseed_log_protocol(fd, buf, size, "SEND");
+		gc3355_log_protocol(fd, buf, size, "SEND");
+	
 	return write(fd, buf, size);
 }
 

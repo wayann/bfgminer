@@ -132,6 +132,17 @@ bool gridseed_lowl_probe(const struct lowlevel_device_info * const info)
 }
 
 static
+bool gridseed_thread_prepare(struct thr_info *thr)
+{
+	thr->cgpu_data = calloc(1, sizeof(*thr->cgpu_data));
+
+	struct cgpu_info *device = thr->cgpu;
+	device->min_nonce_diff = 1./0x10000;
+
+	return true;
+}
+
+static
 void gridseed_thread_shutdown(struct thr_info *thr)
 {
 	struct cgpu_info *device = thr->cgpu;
@@ -140,144 +151,58 @@ void gridseed_thread_shutdown(struct thr_info *thr)
 	free(thr->cgpu_data);
 }
 
+// miner loop
 static
-void gridseed_reset_state(struct thr_info *thr)
-{
-	struct gc3355_state * const state = thr->cgpu_data;
-
-	memset(state->work, 0, sizeof(state->work));
-	state->nonce = 0;
-}
-
-static
-bool gridseed_thread_prepare(struct thr_info *thr)
-{
-	thr->cgpu_data = calloc(1, sizeof(*thr->cgpu_data));
-	gridseed_reset_state(thr);
-	
-	return true;
-}
-
-static
-bool gridseed_thread_init(struct thr_info *thr)
-{
-//	struct cgpu_info *device = thr->cgpu;
-//
-//	applog(LOG_DEBUG, "%"PRIpreprv": init", device->proc_repr);
-//
-//	if (device->device_fd == -1)
-//	{
-//
-//	}
-//
-//	int fd = gridseed_open(device->device_path);
-//	if (unlikely(-1 == fd))
-//	{
-//		applog(LOG_ERR, "%"PRIpreprv": Failed to open %s", device->proc_repr, device->device_path);
-//		return false;
-//	}
-//
-//	device->device_fd = fd;
-//
-//	gc3355_init(device);
-//
-//	applog(LOG_INFO, "%"PRIpreprv": Opened %s", device->proc_repr, device->device_path);
-
-	return true;
-}
-
-static
-int64_t gridseed_job_process_results(struct thr_info *thr, struct work *work, bool stopping)
-{
-	struct cgpu_info * const device = thr->cgpu;
-	struct gc3355_state * const state = thr->cgpu_data;
-
-	submit_nonce(thr, work, state->nonce);
-
-	return state->hashrate;
-}
-
-static
-bool gridseed_job_prepare(struct thr_info *thr, struct work *work, __maybe_unused uint64_t max_nonce)
-{
-	struct gc3355_state * const state = thr->cgpu_data;
-
-	memcpy(state->work, "\x55\xaa\x1f\x00", 4);
-	memcpy(state->work + 4, work->target, 32);
-	memcpy(state->work + 36, work->midstate, 32);
-	memcpy(state->work + 68, work->data, 80);
-	memcpy(state->work + 148, "\xff\xff\xff\xff", 4);  // nonce_max
-	memcpy(state->work + 152, "\x12\x34\x56\x78", 4);  // taskid
-
-	work->blk.nonce = 0xffffffff;
-
-	return true;
-}
-
-static
-void gridseed_job_start(struct thr_info *thr)
+bool gridseed_prepare_work(struct thr_info __maybe_unused *thr, struct work *work)
 {
 	struct cgpu_info *device = thr->cgpu;
+	struct gc3355_info *info = device->device_data;
+	struct gc3355_state * const state = thr->cgpu_data;
+
+	cgtime(&state->scanhash_time);
 
 	gc3355_scrypt_reset(device);
 
-	struct gc3355_info *info = (struct gc3355_info *)device->device_data;
-	int fd = device->device_fd;
+	unsigned char cmd[156];
+
+	memcpy(cmd, "\x55\xaa\x1f\x00", 4);
+	memcpy(cmd+4, work->target, 32);
+	memcpy(cmd+36, work->midstate, 32);
+	memcpy(cmd+68, work->data, 80);
+	memcpy(cmd+148, "\xff\xff\xff\xff", 4);  // nonce_max
+	memcpy(cmd+152, "\x12\x34\x56\x78", 4);  // taskid
+
+	return (gc3355_write(device->device_fd, cmd, sizeof(cmd)) == sizeof(cmd));
+}
+
+static
+int64_t gridseed_scanhash(struct thr_info *thr, struct work *work, int64_t __maybe_unused max_nonce)
+{
+	struct cgpu_info *device = thr->cgpu;
+	struct gc3355_info *info = device->device_data;
 	struct gc3355_state * const state = thr->cgpu_data;
 
-	int size = sizeof(state->work);
+	unsigned char buf[GC3355_READ_SIZE];
+	int read = 0;
+	struct timeval old_scanhash_time = state->scanhash_time;
+	int elapsed_ms;
+	int fd = device->device_fd;
 
-	struct timeval hashstart;
-	timer_set_now(&hashstart);
-
-	int written = gc3355_write(fd, state->work, size);
-	if (written != size)
-	{
-		applog(LOG_ERR, "%"PRIpreprv": Failed writing work task", device->proc_repr);
-		dev_error(device, REASON_DEV_COMMS_ERROR);
-		job_start_abort(thr, true);
-		return;
+	while (!thr->work_restart && (read = gc3355_read(fd, (char *)buf, GC3355_READ_SIZE)) > 0) {
+		if (buf[0] == 0x55 || buf[1] == 0x20) {
+			uint32_t nonce = *(uint32_t *)(buf+4);
+			nonce = le32toh(nonce);
+			uint32_t chip = nonce / ((uint32_t)0xffffffff / info->chips);
+			submit_nonce(thr, work, nonce);
+		} else {
+			applog(LOG_ERR, "%"PRIpreprv": Unrecognized response", device->proc_repr);
+			return -1;
+		}
 	}
 
-	char buf[GC3355_READ_SIZE];
-
-	int read = gc3355_read(fd, buf, GC3355_READ_SIZE);
-
-	if(unlikely(read == -1))
-	{
-		// no job_start_abort for this...see driver-twinfury.c
-		applog(LOG_ERR, "%"PRIpreprv": Work task read timeout", device->proc_repr);
-		job_start_abort(thr, true);
-		return;
-	}
-
-	if (buf[0] == 0x55 || buf[1] == 0x20)
-	{
-		uint32_t nonce = *(uint32_t *)(buf+4);
-		applog(LOG_ERR, "%"PRIpreprv": Nonce read: %u (dec) %x (hex)", device->proc_repr, nonce, nonce);
-		nonce = le32toh(nonce);
-		applog(LOG_ERR, "%"PRIpreprv": Nonce converted: %u (dec) %x (hex)", device->proc_repr, nonce, nonce);
-
-
-		state->nonce = nonce;
-	}
-	else
-	{
-		applog(LOG_ERR, "%"PRIpreprv": Unrecognized response", device->proc_repr);
-		job_start_abort(thr, true);
-		return;
-	}
-
-	mt_job_transition(thr);
-	// TODO: Delay morework until right before it's needed
-	timer_set_now(&thr->tv_morework);
-	job_start_complete(thr);
-
-	struct timeval hashend;
-	timer_set_now(&hashend);
-
-	int elapsed_ms = ms_tdiff(&hashend, &hashstart);
-	state->hashrate = GRIDSEED_HASH_SPEED * (double)elapsed_ms * (double)(info->freq * info->chips);
+	cgtime(&state->scanhash_time);
+	elapsed_ms = ms_tdiff(&state->scanhash_time, &old_scanhash_time);
+	return GRIDSEED_HASH_SPEED * (double)elapsed_ms * (double)(info->freq * info->chips);
 }
 
 struct device_drv gridseed_drv = {
@@ -290,15 +215,13 @@ struct device_drv gridseed_drv = {
 
 	// initialize device
 	.thread_prepare = gridseed_thread_prepare,
-	.thread_init = gridseed_thread_init,
 
-	// mining - async
-	.minerloop = minerloop_async,
+	// mining - scanhash
+	.minerloop = minerloop_scanhash,
 
-	// async mining hooks
-	.job_prepare = gridseed_job_prepare,
-	.job_start = gridseed_job_start,
-	.job_process_results = gridseed_job_process_results,
+	// scanhash mining hooks
+	.prepare_work = gridseed_prepare_work,
+	.scanhash = gridseed_scanhash,
 
 	// teardown device
 	.thread_shutdown = gridseed_thread_shutdown,

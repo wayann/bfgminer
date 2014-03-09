@@ -1,10 +1,12 @@
-//
-//  gc3355.h
-//  bfgminer
-//
-//  Created by Nathanial Woolls on 3/7/14.
-//  Copyright (c) 2014 Nate Woolls. All rights reserved.
-//
+/*
+ * Copyright 2014 Nate Woolls
+ * Copyright 2014 GridSeed Team
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 3 of the License, or (at your option)
+ * any later version.  See COPYING for more details.
+ */
 
 #ifndef bfgminer_gc3355_h
 #define bfgminer_gc3355_h
@@ -27,14 +29,8 @@ struct gc3355_info
 
 struct gc3355_state
 {
-	// request
-	unsigned char work[156];
-
-	// response
-	uint32_t nonce;
-
 	// stats
-	int64_t hashrate;
+	struct timeval scanhash_time;
 };
 
 extern
