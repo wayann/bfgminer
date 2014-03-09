@@ -28,7 +28,7 @@ struct gc3355_info
 struct gc3355_state
 {
 	// request
-	uint8_t work[156];
+	unsigned char work[156];
 
 	// response
 	uint32_t nonce;
@@ -38,12 +38,15 @@ struct gc3355_state
 };
 
 extern
-int gc3355_read(int fd, char *buf, int size);
+int gc3355_read(int fd, char *buf, size_t size);
 
 extern
 ssize_t gc3355_write(int fd, const void * const buf, const size_t size);
 
 extern
 void gc3355_init(struct cgpu_info *device);
+
+extern
+void gc3355_scrypt_reset(struct cgpu_info *device);
 
 #endif

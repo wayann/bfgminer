@@ -75,14 +75,29 @@ void gridseed_log_protocol(int fd, const char *buf, size_t size, const char *pre
 {
 	char hex[(size * 2) + 1];
 	bin2hex(hex, buf, size);
-	applog(LOG_DEBUG, "%s fd=%d: DEVPROTO: %s %s", GC3355_CHIP_NAME, fd, prefix, hex);
+	applog(LOG_DEBUG, "%s fd=%d: DEVPROTO: %s(%3d) %s", GC3355_CHIP_NAME, fd, prefix, size, hex);
 }
 
-int gc3355_read(int fd, char *buf, int size)
+int gc3355_read(int fd, char *buf, size_t size)
 {
-	int read = serial_read(fd, buf, size);
+	size_t read;
+	int tries = 2000;
+
+	while (tries > 0)
+	{
+		read = serial_read(fd, buf, size);
+		if (read > 0)
+			break;
+
+		tries--;
+	}
+
+	if(unlikely(tries == 0))
+		return -1;
+
 	if ((read > 0) && opt_dev_protocol)
 		gridseed_log_protocol(fd, buf, size, "RECV");
+
 	return read;
 }
 
@@ -97,19 +112,20 @@ static
 void gc3355_send_cmds(int fd, const char *cmds[])
 {
 	int i = 0;
-	unsigned char ob_bin[32];
+	unsigned char ob_bin[512];
 	for(i = 0 ;; i++)
 	{
 		memset(ob_bin, 0, sizeof(ob_bin));
 
-		//allow NULL or "" to terminate
-		if (cmds[i] == NULL)
-			break;
-		if (cmds[i][0] == 0)
+		const char *cmd = cmds[i];
+
+		if (cmd == NULL)
 			break;
 
-		hex2bin(ob_bin, cmds[i], strlen(cmds[i]) / 2);
-		gc3355_write(fd, ob_bin, 8);
+		int size = strlen(cmd) / 2;
+		hex2bin(ob_bin, cmd, size);
+		gc3355_write(fd, ob_bin, size);
+
 		usleep(GC3355_COMMAND_DELAY);
 	}
 }
@@ -138,6 +154,12 @@ void gc3355_set_core_freq(struct cgpu_info *device)
 	usleep(GC3355_COMMAND_DELAY);
 
 	applog(LOG_DEBUG, "%s fd=%d: Set %s core frequency to %d MHz", GC3355_CHIP_NAME, fd, GC3355_CHIP_NAME, info->freq);
+}
+
+void gc3355_scrypt_reset(struct cgpu_info *device)
+{
+	int fd = device->device_fd;
+	gc3355_send_cmds(fd, str_scrypt_reset);
 }
 
 void gc3355_init(struct cgpu_info *device)

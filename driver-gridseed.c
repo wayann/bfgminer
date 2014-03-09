@@ -50,10 +50,10 @@ bool gridseed_detect_custom(const char *path, struct device_drv *driver, struct 
 
 	const char detect_cmd[] = "55aac000909090900000000001000000";
 	unsigned char detect_data[16];
-
-	hex2bin(detect_data, detect_cmd, sizeof(detect_data));
-
 	int size = sizeof(detect_data);
+
+	hex2bin(detect_data, detect_cmd, size);
+
 	int written = gc3355_write(fd, detect_data, size);
 	if (written != size)
 	{
@@ -83,19 +83,15 @@ bool gridseed_detect_custom(const char *path, struct device_drv *driver, struct 
 
 	struct cgpu_info *device = gridseed_alloc_device(path, driver, info);
 
-	device->device_fd = fd;
-	gc3355_init(device);
-
-	serial_close(fd);
-
-	device->device_fd = -1;
-
 	if (serial_claim_v(path, driver))
 		return false;
-
 	
 	if (!add_cgpu(device))
 		return false;
+
+	device->device_fd = fd;
+
+	gc3355_init(device);
 
 	applog(LOG_INFO, "Found %"PRIpreprv" at %s", device->proc_repr, path);
 	applog(LOG_DEBUG, "%"PRIpreprv": Init: firmware=%d", device->proc_repr, fw_version);
@@ -157,6 +153,7 @@ static
 bool gridseed_thread_prepare(struct thr_info *thr)
 {
 	thr->cgpu_data = calloc(1, sizeof(*thr->cgpu_data));
+	gridseed_reset_state(thr);
 	
 	return true;
 }
@@ -164,24 +161,27 @@ bool gridseed_thread_prepare(struct thr_info *thr)
 static
 bool gridseed_thread_init(struct thr_info *thr)
 {
-	struct cgpu_info *device = thr->cgpu;
-
-	applog(LOG_DEBUG, "%"PRIpreprv": init", device->proc_repr);
-
-	int fd = gridseed_open(device->device_path);
-	if (unlikely(-1 == fd))
-	{
-		applog(LOG_ERR, "%"PRIpreprv": Failed to open %s", device->proc_repr, device->device_path);
-		return false;
-	}
-
-	device->device_fd = fd;
-
-	gridseed_reset_state(thr);
-
-	gc3355_init(device);
-
-	applog(LOG_INFO, "%"PRIpreprv": Opened %s", device->proc_repr, device->device_path);
+//	struct cgpu_info *device = thr->cgpu;
+//
+//	applog(LOG_DEBUG, "%"PRIpreprv": init", device->proc_repr);
+//
+//	if (device->device_fd == -1)
+//	{
+//
+//	}
+//
+//	int fd = gridseed_open(device->device_path);
+//	if (unlikely(-1 == fd))
+//	{
+//		applog(LOG_ERR, "%"PRIpreprv": Failed to open %s", device->proc_repr, device->device_path);
+//		return false;
+//	}
+//
+//	device->device_fd = fd;
+//
+//	gc3355_init(device);
+//
+//	applog(LOG_INFO, "%"PRIpreprv": Opened %s", device->proc_repr, device->device_path);
 
 	return true;
 }
@@ -200,10 +200,7 @@ int64_t gridseed_job_process_results(struct thr_info *thr, struct work *work, bo
 static
 bool gridseed_job_prepare(struct thr_info *thr, struct work *work, __maybe_unused uint64_t max_nonce)
 {
-	struct cgpu_info * const device = thr->cgpu;
 	struct gc3355_state * const state = thr->cgpu_data;
-
-	unsigned char cmd[156];
 
 	memcpy(state->work, "\x55\xaa\x1f\x00", 4);
 	memcpy(state->work + 4, work->target, 32);
@@ -221,6 +218,9 @@ static
 void gridseed_job_start(struct thr_info *thr)
 {
 	struct cgpu_info *device = thr->cgpu;
+
+	gc3355_scrypt_reset(device);
+
 	struct gc3355_info *info = (struct gc3355_info *)device->device_data;
 	int fd = device->device_fd;
 	struct gc3355_state * const state = thr->cgpu_data;
@@ -241,29 +241,25 @@ void gridseed_job_start(struct thr_info *thr)
 
 	char buf[GC3355_READ_SIZE];
 
-	int read = 0;
+	int read = gc3355_read(fd, buf, GC3355_READ_SIZE);
 
-
-	while(1)
+	if(unlikely(read == -1))
 	{
-		read = gc3355_read(fd, buf, GC3355_READ_SIZE);
-		if (read > 0)
-			break;
-	}
-
-	if (read != GC3355_READ_SIZE)
-	{
-		applog(LOG_ERR, "%"PRIpreprv": Failed reading work task", device->proc_repr);
-		dev_error(device, REASON_DEV_COMMS_ERROR);
+		// no job_start_abort for this...see driver-twinfury.c
+		applog(LOG_ERR, "%"PRIpreprv": Work task read timeout", device->proc_repr);
 		job_start_abort(thr, true);
 		return;
 	}
 
 	if (buf[0] == 0x55 || buf[1] == 0x20)
 	{
-		state->nonce = le32toh(*(uint32_t *)(buf+4));
-//		if (!submit_nonce(thr, work, nonce))
-//			info->error_count[chip]++;
+		uint32_t nonce = *(uint32_t *)(buf+4);
+		applog(LOG_ERR, "%"PRIpreprv": Nonce read: %u (dec) %x (hex)", device->proc_repr, nonce, nonce);
+		nonce = le32toh(nonce);
+		applog(LOG_ERR, "%"PRIpreprv": Nonce converted: %u (dec) %x (hex)", device->proc_repr, nonce, nonce);
+
+
+		state->nonce = nonce;
 	}
 	else
 	{

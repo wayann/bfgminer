@@ -8961,7 +8961,7 @@ bool submit_noffset_nonce(struct thr_info *thr, struct work *work_in, uint32_t n
 			ret = false;
 			goto out;
 		}
-	
+
 	mutex_lock(&stats_lock);
 	total_diff1       += work->nonce_diff;
 	thr ->cgpu->diff1 += work->nonce_diff;
