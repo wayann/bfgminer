@@ -23,13 +23,15 @@
 #define GC3355_CHIP_NAME "gc3355"
 
 static
-const char *str_reset[] = {
+const char *str_reset[] =
+{
 	"55AAC000808080800000000001000000", // Chip reset
 	NULL
 };
 
 static
-const char *str_init[] = {
+const char *str_init[] =
+{
 	"55AAC000C0C0C0C00500000001000000",
 	"55AAEF020000000000000000000000000000000000000000",
 	"55AAEF3020000000",
@@ -37,7 +39,8 @@ const char *str_init[] = {
 };
 
 static
-const char *str_scrypt_reset[] = {
+const char *str_scrypt_reset[] =
+{
 	"55AA1F2816000000",
 	"55AA1F2817000000",
 	NULL
@@ -45,14 +48,16 @@ const char *str_scrypt_reset[] = {
 
 /* commands to set core frequency */
 static
-const int opt_frequency[] = {
+const int opt_frequency[] =
+{
 	250, 400, 450, 500, 550, 600, 650,
 	700, 750, 800, 850, 900, 950, 1000,
 	-1
 };
 
 static
-const char *bin_frequency[] = {
+const char *bin_frequency[] =
+{
 	"\x55\xaa\xef\x00\x05\x00\x20\x01",
 	"\x55\xaa\xef\x00\x05\x00\xe0\x01",
 	"\x55\xaa\xef\x00\x05\x00\x20\x02",
@@ -107,6 +112,16 @@ ssize_t gc3355_write(int fd, const void * const buf, const size_t size)
 		gc3355_log_protocol(fd, buf, size, "SEND");
 	
 	return write(fd, buf, size);
+}
+
+int gc3355_open(const char *path)
+{
+	return serial_open(path, 115200, 1, true);
+}
+
+int gc3355_close(int fd)
+{
+	return serial_close(fd);
 }
 
 static

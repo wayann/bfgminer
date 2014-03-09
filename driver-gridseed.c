@@ -20,12 +20,15 @@
 
 BFG_REGISTER_DRIVER(gridseed_drv)
 
+// helpers
+
 static
 struct cgpu_info *gridseed_alloc_device(const char *path, struct device_drv *driver, struct gc3355_info *info)
 {
-	struct cgpu_info *device;
+	struct cgpu_info *device = calloc(1, sizeof(struct cgpu_info));
+	if (unlikely(!device))
+		quit(1, "Failed to malloc cgpu_info");
 
-	device = calloc(1, sizeof(struct cgpu_info));
 	device->drv = driver;
 	device->device_path = strdup(path);
 	device->device_fd = -1;
@@ -36,15 +39,24 @@ struct cgpu_info *gridseed_alloc_device(const char *path, struct device_drv *dri
 }
 
 static
-int gridseed_open(const char *path)
+struct gc3355_info *gridseed_alloc_info()
 {
-	return serial_open(path, 115200, 1, true);
+	struct gc3355_info *info = calloc(1, sizeof(struct gc3355_info));
+	if (unlikely(!info))
+		quit(1, "Failed to malloc gc3355_info");
+
+	info->freq = GC3355_DEFAULT_FREQUENCY;
+	info->chips = GC3355_DEFAULT_CHIPS;
+
+	return info;
 }
+
+// device detection
 
 static
 bool gridseed_detect_custom(const char *path, struct device_drv *driver, struct gc3355_info *info)
 {
-	int fd = gridseed_open(path);
+	int fd = gc3355_open(path);
 	if(fd < 0)
 		return false;
 
@@ -58,7 +70,7 @@ bool gridseed_detect_custom(const char *path, struct device_drv *driver, struct 
 	if (written != size)
 	{
 		applog(LOG_ERR, "%s: Failed writing work to %s", gridseed_drv.dname, path);
-		serial_close(fd);
+		gc3355_close(fd);
 		return false;
 	}
 
@@ -67,15 +79,14 @@ bool gridseed_detect_custom(const char *path, struct device_drv *driver, struct 
 	if (read != GC3355_READ_SIZE)
 	{
 		applog(LOG_ERR, "%s: Failed reading work from %s", gridseed_drv.dname, path);
-		serial_close(fd);
+		gc3355_close(fd);
 		return false;
 	}
 
 	if (memcmp(buf, "\x55\xaa\xc0\x00\x90\x90\x90\x90", GC3355_READ_SIZE - 4) != 0)
 	{
-		applog(LOG_ERR, "%s: Invalid detect response from %s",
-		       gridseed_drv.dname, path);
-		serial_close(fd);
+		applog(LOG_ERR, "%s: Invalid detect response from %s", gridseed_drv.dname, path);
+		gc3355_close(fd);
 		return false;
 	}
 
@@ -100,19 +111,6 @@ bool gridseed_detect_custom(const char *path, struct device_drv *driver, struct 
 }
 
 static
-struct gc3355_info *gridseed_alloc_info()
-{
-	struct gc3355_info *info = calloc(1, sizeof(struct gc3355_info));
-	if (unlikely(!info))
-		quit(1, "Failed to malloc gc3355_info");
-
-	info->freq = GC3355_DEFAULT_FREQUENCY;
-	info->chips = GC3355_DEFAULT_CHIPS;
-
-	return info;
-}
-
-static
 bool gridseed_detect_one(const char *path)
 {
 	struct gc3355_info *info = gridseed_alloc_info();
@@ -131,6 +129,7 @@ bool gridseed_lowl_probe(const struct lowlevel_device_info * const info)
 	return vcom_lowl_probe_wrapper(info, gridseed_detect_one);
 }
 
+// setup & shutdown
 static
 bool gridseed_thread_prepare(struct thr_info *thr)
 {
@@ -146,12 +145,14 @@ static
 void gridseed_thread_shutdown(struct thr_info *thr)
 {
 	struct cgpu_info *device = thr->cgpu;
-	serial_close(device->device_fd);
+	gc3355_close(device->device_fd);
 
 	free(thr->cgpu_data);
 }
 
 // miner loop
+
+// send work to the device
 static
 bool gridseed_prepare_work(struct thr_info __maybe_unused *thr, struct work *work)
 {
@@ -175,37 +176,50 @@ bool gridseed_prepare_work(struct thr_info __maybe_unused *thr, struct work *wor
 	return (gc3355_write(device->device_fd, cmd, sizeof(cmd)) == sizeof(cmd));
 }
 
+// read response (nonce) from the device
+
+static
+int64_t gridseed_calc_hashes(struct thr_info *thr)
+{
+	struct cgpu_info *device = thr->cgpu;
+	struct gc3355_state * const state = thr->cgpu_data;
+	struct timeval old_scanhash_time = state->scanhash_time;
+	cgtime(&state->scanhash_time);
+	int elapsed_ms = ms_tdiff(&state->scanhash_time, &old_scanhash_time);
+
+	struct gc3355_info *info = device->device_data;
+	return GRIDSEED_HASH_SPEED * (double)elapsed_ms * (double)(info->freq * info->chips);
+}
+
 static
 int64_t gridseed_scanhash(struct thr_info *thr, struct work *work, int64_t __maybe_unused max_nonce)
 {
 	struct cgpu_info *device = thr->cgpu;
 	struct gc3355_info *info = device->device_data;
-	struct gc3355_state * const state = thr->cgpu_data;
 
 	unsigned char buf[GC3355_READ_SIZE];
 	int read = 0;
-	struct timeval old_scanhash_time = state->scanhash_time;
-	int elapsed_ms;
 	int fd = device->device_fd;
 
-	while (!thr->work_restart && (read = gc3355_read(fd, (char *)buf, GC3355_READ_SIZE)) > 0) {
-		if (buf[0] == 0x55 || buf[1] == 0x20) {
+	while (!thr->work_restart && (read = gc3355_read(fd, (char *)buf, GC3355_READ_SIZE)) > 0)
+	{
+		if (buf[0] == 0x55 || buf[1] == 0x20)
+		{
 			uint32_t nonce = *(uint32_t *)(buf+4);
 			nonce = le32toh(nonce);
-			uint32_t chip = nonce / ((uint32_t)0xffffffff / info->chips);
 			submit_nonce(thr, work, nonce);
-		} else {
+		} else
+		{
 			applog(LOG_ERR, "%"PRIpreprv": Unrecognized response", device->proc_repr);
 			return -1;
 		}
 	}
 
-	cgtime(&state->scanhash_time);
-	elapsed_ms = ms_tdiff(&state->scanhash_time, &old_scanhash_time);
-	return GRIDSEED_HASH_SPEED * (double)elapsed_ms * (double)(info->freq * info->chips);
+	return gridseed_calc_hashes(thr);
 }
 
-struct device_drv gridseed_drv = {
+struct device_drv gridseed_drv =
+{
 	// metadata
 	.dname = "gridseed",
 	.name = "GSD",

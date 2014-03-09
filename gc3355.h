@@ -21,17 +21,24 @@
 #define GC3355_READ_SIZE			12
 #define GRIDSEED_HASH_SPEED			0.0851128926	// in ms
 
+// static information
 struct gc3355_info
 {
 	uint16_t freq;
 	int chips;
 };
 
+// dynamic information
 struct gc3355_state
 {
-	// stats
 	struct timeval scanhash_time;
 };
+
+extern
+int gc3355_open(const char *path);
+
+extern
+int gc3355_close(int fd);
 
 extern
 int gc3355_read(int fd, char *buf, size_t size);
