@@ -15,7 +15,7 @@
 
 #include "miner.h"
 
-#define GC3355_DEFAULT_FREQUENCY	600
+#define GC3355_DEFAULT_FREQUENCY	850
 #define GC3355_DEFAULT_CHIPS		5
 
 #define GC3355_READ_SIZE			12
